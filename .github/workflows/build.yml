@@ -20,7 +20,9 @@ jobs:
           sudo apt install mmdebstrap parted jq btrfs-progs wget unzip multipath-tools dosfstools arch-install-scripts debian-archive-keyring git gdisk
           wget https://apt.ameridroid.com/stable/pool/main/i/imageforge/imageforge_1.1.0_all.deb
           sudo dpkg -i imageforge_1.1.0_all.deb
-
+        
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
           
       - name: Build Debian Image
         run: |
