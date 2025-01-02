@@ -3,7 +3,7 @@
 chroot=$1
 pkgs="grub-efi-arm64 initramfs-tools linux-rockchip mali-g610-firmware kmod systemd-timesyncd"
 run_in_chroot() {
-    arch-chroot $chroot /bin/bash -c "$1"
+    chroot $chroot /bin/bash -c "$1"
 }
 
 echo "Setting up the system"
