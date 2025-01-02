@@ -24,6 +24,7 @@ has_uefi = True
 cmdline = "console=ttyFIQ0,1500000n8 console=tty1 console=both loglevel=7 rw panic=10 init=/sbin/init rootflags=subvol=@ rootfstype=btrfs"
 grubcmdl = "console=ttyFIQ0,1500000n8 console=tty1 console=both rw init=/sbin/init"
 grubdtb = "/6.1.0-1023-rockchip/dtbs/rockchip/rk3588s-indiedroid-nova.dtb"
+
 partition_table = lambda img_size, fs: {
     "UEFI": ["0%", "8M", "8M", "NONE"],
     "boot": ["9M", "32M", "24M", "fat32"],
