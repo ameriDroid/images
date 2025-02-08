@@ -41,3 +41,6 @@ zstd
 network-manager
 network-manager-gnome
 firefox-esr
+wireless-regdb
+wpasupplicant
+firmware-realtek
