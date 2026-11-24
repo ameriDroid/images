@@ -7,75 +7,91 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Native arm64 runner: no qemu, and the chroot steps (apt, grub-install, initramfs) run at full speed.
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [nova-bookworm, nova-trixie, nova-resolute]
     steps:
-
       - name: Checkout Images
         uses: actions/checkout@v4
         with:
           path: images
 
+      - name: Checkout imageforge
+        uses: actions/checkout@v4
+        with:
+          repository: ameriDroid/imageforge
+          path: imageforge
+
       - name: Install dependencies
         run: |
-          sudo apt install mmdebstrap parted jq btrfs-progs wget unzip multipath-tools dosfstools arch-install-scripts debian-archive-keyring git gdisk
-          wget https://apt.ameridroid.com/stable/pool/main/i/imageforge/imageforge_1.1.0_all.deb
-          sudo dpkg -i imageforge_1.1.0_all.deb
-        
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-          
-      - name: Build Debian Image
+          sudo apt-get update
+          sudo apt-get install -y mmdebstrap parted jq btrfs-progs wget unzip multipath-tools dosfstools \
+            arch-install-scripts debian-archive-keyring ubuntu-keyring git gdisk rsync xz-utils python3-setuptools
+          # Ubuntu's debian-archive-keyring predates trixie; take the current keyring from Debian
+          wget -q https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb
+          sudo dpkg -i debian-archive-keyring_2025.1_all.deb
+          sudo pip3 install --break-system-packages ./imageforge
+
+      - name: Build ${{ matrix.profile }}
         run: |
-          sudo umount -R ./work-deb/aarch64/* || true
-          for i in {1..3}; do
-              sudo python3 ./images/nova-bookworm/profiledef -c ./images/nova-bookworm/ -w ./work-deb -o ./out && break
+          sudo umount -R ./work/arm64/* ./work/mnt 2>/dev/null || true
+          for i in 1 2 3; do
+            sudo python3 "$GITHUB_WORKSPACE/images/${{ matrix.profile }}/profiledef" -c "$GITHUB_WORKSPACE/images/${{ matrix.profile }}" -w "$GITHUB_WORKSPACE/work" -o "$GITHUB_WORKSPACE/out" && break
+            sudo umount -R ./work/arm64/* ./work/mnt 2>/dev/null || true
           done
+          ls ./out/*.img.xz
 
       - name: Cleanup
         if: always()
         run: |
-          sudo umount -R ./work-deb/aarch64/* || true
-          sudo rm -rf ./work-deb
-        
-      - name: Set current date as tag name
-        id: set_tag_name
-        run: echo "TAG_NAME=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
-  
-      - name: Create Release
+          sudo umount -R ./work/arm64/* ./work/mnt 2>/dev/null || true
+          sudo rm -rf ./work
+
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.profile }}
+          path: ./out/*.img.xz
+          compression-level: 0
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download images
+        uses: actions/download-artifact@v4
+        with:
+          path: ./out
+          merge-multiple: true
+
+      - name: Create release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          TAG_NAME: ${{ env.TAG_NAME }}
-        id: create_release
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          RELEASE_BODY=""
-          for i in $(ls ./out/*.img.xz); do
-            FILENAME=$(basename $i)
-            SHA256=$(sha256sum $i | awk '{ print $1 }')
-            RELEASE_BODY+="\nsha256 for $FILENAME:\n\`\`\`\n$SHA256\n\`\`\`\n"
-          done
-
-          RELEASE_RESPONSE=$(curl -s -X POST \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"tag_name\": \"$TAG_NAME\", \"name\": \"$TAG_NAME\", \"body\": \"$RELEASE_BODY\", \"draft\": false, \"prerelease\": false}" \
-            "https://api.github.com/repos/$REPO/releases")
-
-          RELEASE_ID=$(echo $RELEASE_RESPONSE | jq -r '.id')
-
-          if [ "$RELEASE_ID" == "null" ]; then
-            echo "Failed to create a release. Response: $RELEASE_RESPONSE"
-            exit 1
-          fi
-        
-          for file in ./out/*.img.xz; do
-            curl -X POST \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Content-Type: application/octet-stream" \
-              -T "$file" \
-              "https://uploads.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID/assets?name=$(basename "$file")"
-          done
-
-      - name: Clean up
-        run: |
-          rm ./out/ -rf
+          tag=$(date +'%Y-%m-%d')
+          {
+            echo '| Image | Base | Kernel | Login (user / password) |'
+            echo '|---|---|---|---|'
+            for f in ./out/*.img.xz; do
+              n=$(basename "$f")
+              case "$n" in
+                Ubuntu2604-*) row='Ubuntu 26.04 | 7.0 generic | `ubuntu` / `ubuntu`' ;;
+                Debian13-*)   row='Debian 13 | 7.x trixie-backports | `debian` / `debian`' ;;
+                Debian-*)     row='Debian 12 | 6.1 rockchip | `debian` / `debian`' ;;
+                *)            row='? | ? | ?' ;;
+              esac
+              echo "| \`$n\` | $row |"
+            done
+            echo
+            echo 'sha256:'
+            echo '```'
+            (cd ./out && sha256sum *.img.xz)
+            echo '```'
+          } > notes.md
+          gh release create "$tag" ./out/*.img.xz --repo "$GITHUB_REPOSITORY" --title "$tag" --notes-file notes.md

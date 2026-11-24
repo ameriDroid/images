@@ -64,6 +64,10 @@ def main() -> None:
     debstrap_packages()
     copyfiles(cfg["config_dir"] + "/rootfs", cfg["install_dir"])
     remove_machine_id()
+    # Leave an "uninitialized" machine-id: systemd then treats the first boot as first boot and
+    # generates/commits a real ID. A missing file makes systemd complain on every boot.
+    with open(cfg["install_dir"] + "/etc/machine-id", "w") as f:
+        f.write("uninitialized\n")
     fixperms()
     copy_skel_to_users()
     logging.info("Partitioning Nova Image")

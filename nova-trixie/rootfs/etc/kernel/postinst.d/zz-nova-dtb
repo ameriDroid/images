@@ -1,0 +1,8 @@
+#!/bin/sh
+# Copy the mainline Nova DTB from the newest installed Debian kernel to a stable path grub loads.
+set -e
+ver="${1:-$(ls -d /usr/lib/linux-image-* | sed 's#.*/linux-image-##' | sort -V | tail -1)}"
+src="/usr/lib/linux-image-$ver/rockchip/rk3588s-indiedroid-nova.dtb"
+[ -f "$src" ] || exit 0
+mkdir -p /boot/dtbs
+cp "$src" /boot/dtbs/rk3588s-indiedroid-nova.dtb
